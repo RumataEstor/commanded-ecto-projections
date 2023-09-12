@@ -41,9 +41,10 @@ defmodule Commanded.Projections.Ecto do
       @repo @opts[:repo] || Application.compile_env(:commanded_ecto_projections, :repo) ||
               raise("Commanded Ecto projections expects :repo to be configured in environment")
       @timeout @opts[:timeout] || :infinity
+      @always_after_update @opts[:always_after_update] || false
 
       # Pass through any other configuration to the event handler
-      @handler_opts Keyword.drop(@opts, [:repo, :schema_prefix, :timeout])
+      @handler_opts Keyword.drop(@opts, [:repo, :schema_prefix, :timeout, :always_after_update])
 
       unquote(__include_schema_prefix__(schema_prefix))
       unquote(__include_projection_version_schema__())
@@ -99,9 +100,22 @@ defmodule Commanded.Projections.Ecto do
             :ok
           end
         else
-          {:error, :verify_projection_version, :already_seen_event, _changes} -> :ok
-          {:error, _stage, error, _changes} -> {:error, error}
-          {:error, _error} = reply -> reply
+          {:error, :verify_projection_version, :already_seen_event, changes}
+          when @always_after_update ->
+            if function_exported?(__MODULE__, :after_update, 3) do
+              apply(__MODULE__, :after_update, [event, metadata, changes])
+            else
+              :ok
+            end
+
+          {:error, :verify_projection_version, :already_seen_event, _changes} ->
+            :ok
+
+          {:error, _stage, error, _changes} ->
+            {:error, error}
+
+          {:error, _error} = reply ->
+            reply
         end
       end
 
